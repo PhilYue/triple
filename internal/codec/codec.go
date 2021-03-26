@@ -18,7 +18,9 @@
 package codec
 
 import (
+	hessian "github.com/apache/dubbo-go-hessian2"
 	"github.com/golang/protobuf/proto"
+	perrors "github.com/pkg/errors"
 )
 
 import (
@@ -26,11 +28,9 @@ import (
 )
 
 func init() {
-	common.SetDubbo3Serializer(DefaultDubbo3SerializerName, NewProtobufCodeC)
+	common.SetDubbo3Serializer(common.PBSerializerName, NewProtobufCodeC)
+	common.SetDubbo3Serializer(common.HessianSerializerName, NewHessianCodeC)
 }
-
-// DefaultDubbo3SerializerName is the default serializer name, triple use pb as serializer.
-const DefaultDubbo3SerializerName = "protobuf"
 
 // ProtobufCodeC is the protobuf impl of Dubbo3Serializer interface
 type ProtobufCodeC struct {
@@ -49,4 +49,58 @@ func (p *ProtobufCodeC) Unmarshal(data []byte, v interface{}) error {
 // NewProtobufCodeC returns new ProtobufCodeC
 func NewProtobufCodeC() common.Dubbo3Serializer {
 	return &ProtobufCodeC{}
+}
+
+// HessianTransferPackage is hessian encode package, wrapping pb data
+type HessianTransferPackage struct {
+	Length int
+	Type   string
+	Data   []byte
+}
+
+func (HessianTransferPackage) JavaClassName() string {
+	return "org.apache.dubbo.HessianPkg"
+}
+
+type HessianCodeC struct {
+	protoBufSerilizer common.Dubbo3Serializer
+}
+
+func (h *HessianCodeC) Marshal(v interface{}) ([]byte, error) {
+	pbData, err := h.protoBufSerilizer.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	hessianTranseferPkg := HessianTransferPackage{
+		Length: len(pbData),
+		Data:   pbData,
+	}
+	encoder := hessian.NewEncoder()
+	if err := encoder.Encode(hessianTranseferPkg); err != nil {
+		return nil, err
+	}
+	return encoder.Buffer(), nil
+}
+
+func (h *HessianCodeC) Unmarshal(data []byte, v interface{}) error {
+	var err error
+	var pbStruct interface{}
+	decoder := hessian.NewDecoder(data)
+	pbStruct, err = decoder.Decode()
+	if err != nil {
+		return err
+	}
+	hessianTransferPkg, ok := pbStruct.(*HessianTransferPackage)
+	if !ok {
+		return perrors.Errorf("hessian serializer gets pkg that not hessianTransfer pkg")
+	}
+	return h.protoBufSerilizer.Unmarshal(hessianTransferPkg.Data, v)
+}
+
+// NewHessianCodeC returns new HessianCodeC
+func NewHessianCodeC() common.Dubbo3Serializer {
+	hessian.RegisterPOJO(&HessianTransferPackage{})
+	return &HessianCodeC{
+		protoBufSerilizer: NewProtobufCodeC(),
+	}
 }

@@ -29,7 +29,6 @@ import (
 	"google.golang.org/grpc"
 )
 import (
-	"github.com/dubbogo/triple/internal/codec"
 	"github.com/dubbogo/triple/internal/codes"
 	"github.com/dubbogo/triple/internal/message"
 	"github.com/dubbogo/triple/internal/status"
@@ -81,17 +80,10 @@ type unaryProcessor struct {
 }
 
 // newUnaryProcessor can create unary processor
-func newUnaryProcessor(s *serverStream, pkgHandler common.PackageHandler, desc grpc.MethodDesc) (processor, error) {
-	serilizer, err := common.GetDubbo3Serializer(codec.DefaultDubbo3SerializerName)
-	if err != nil {
-		logger.Error("newProcessor with serialization"+
-			" ", codec.DefaultDubbo3SerializerName, " error")
-		return nil, err
-	}
-
+func newUnaryProcessor(s *serverStream, pkgHandler common.PackageHandler, desc grpc.MethodDesc, serializer common.Dubbo3Serializer) (processor, error) {
 	return &unaryProcessor{
 		baseProcessor: baseProcessor{
-			serializer: serilizer,
+			serializer: serializer,
 			stream:     s,
 			pkgHandler: pkgHandler,
 			closeChain: make(chan struct{}, 1),
@@ -172,16 +164,10 @@ type streamingProcessor struct {
 }
 
 // newStreamingProcessor can create new streaming processor
-func newStreamingProcessor(s *serverStream, pkgHandler common.PackageHandler, desc grpc.StreamDesc) (processor, error) {
-	serilizer, err := common.GetDubbo3Serializer(codec.DefaultDubbo3SerializerName)
-	if err != nil {
-		logger.Error("newProcessor with serlizationg ", codec.DefaultDubbo3SerializerName, " error")
-		return nil, err
-	}
-
+func newStreamingProcessor(s *serverStream, pkgHandler common.PackageHandler, desc grpc.StreamDesc, serializer common.Dubbo3Serializer) (processor, error) {
 	return &streamingProcessor{
 		baseProcessor: baseProcessor{
-			serializer: serilizer,
+			serializer: serializer,
 			stream:     s,
 			pkgHandler: pkgHandler,
 			closeChain: make(chan struct{}, 1),

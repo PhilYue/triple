@@ -20,7 +20,6 @@ package codec
 import (
 	"context"
 	"github.com/apache/dubbo-go/common/constant"
-	h2 "github.com/dubbogo/net/http2"
 	h2Triple "github.com/dubbogo/net/http2/triple"
 	"net/http"
 	"net/textproto"
@@ -108,6 +107,7 @@ func NewTripleHeaderHandler(url *dubboCommon.URL, ctx context.Context) h2Triple.
 // it parse field of url and ctx to HTTP2 Header field, developer must assure "tri-" prefix field be string
 // if not, it will cause panic!
 func (t *TripleHeaderHandler) WriteTripleReqHeaderField(header http.Header) http.Header {
+
 	header["user-agent"] = []string{"grpc-go/1.35.0-dev"}
 	// get from ctx
 	//header["tri-service-version"] = []string{getCtxVaSave(t.Ctx, "tri-service-version")}
@@ -132,9 +132,9 @@ func (t *TripleHeaderHandler) WriteTripleReqHeaderField(header http.Header) http
 
 // WriteTripleFinalRspHeaderField returns trailers header fields that triple and grpc defined
 func (t *TripleHeaderHandler) WriteTripleFinalRspHeaderField(w http.ResponseWriter, grpcStatusCode int, grpcMessage string, traceProtoBin int) {
-	w.Header().Add(h2.TrailerPrefix+TrailerKeyGrpcStatus, strconv.Itoa(grpcStatusCode))   // sendMsg.st.Code()
-	w.Header().Add(h2.TrailerPrefix+TrailerKeyGrpcMessage, grpcMessage)                   //encodeGrpcMessage(""))
-	w.Header().Add(h2.TrailerPrefix+TrailerKeyTraceProtoBin, strconv.Itoa(traceProtoBin)) // sendMsg.st.Code()
+	w.Header().Set(TrailerKeyGrpcStatus, strconv.Itoa(grpcStatusCode))   // sendMsg.st.Code()
+	w.Header().Set(TrailerKeyGrpcMessage, grpcMessage)                   //encodeGrpcMessage(""))
+	w.Header().Set(TrailerKeyTraceProtoBin, strconv.Itoa(traceProtoBin)) // sendMsg.st.Code()
 }
 
 // getCtxVaSave get key @fields value and return, if not exist, return empty string

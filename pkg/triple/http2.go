@@ -39,7 +39,6 @@ import (
 	"github.com/apache/dubbo-go/common/logger"
 	h2 "github.com/dubbogo/net/http2"
 	h2Triple "github.com/dubbogo/net/http2/triple"
-	"github.com/golang/protobuf/proto"
 	perrors "github.com/pkg/errors"
 	"google.golang.org/grpc"
 )
@@ -74,6 +73,8 @@ type H2Controller struct {
 
 	// option is 10M by default
 	option *config.Option
+
+	serializer common.Dubbo3Serializer
 }
 
 // skipHeader is to skip first 5 byte from dataframe with header
@@ -203,6 +204,9 @@ func (hc *H2Controller) GetHandler() func(w http.ResponseWriter, r *http.Request
 
 		// todo  in which condition does header response not 200?
 		// first response header
+		w.Header().Add("Trailer", codec.TrailerKeyGrpcStatus)
+		w.Header().Add("Trailer", codec.TrailerKeyGrpcMessage)
+		w.Header().Add("Trailer", codec.TrailerKeyTraceProtoBin)
 		w.Header().Add("content-type", "application/grpc+proto")
 
 		// start receiving response from upper proxy invoker, and forward to remote http2 client
@@ -218,7 +222,10 @@ func (hc *H2Controller) GetHandler() func(w http.ResponseWriter, r *http.Request
 				if sendMsg.Buffer == nil || sendMsg.MsgType != message.DataMsgType {
 					if sendMsg.Status != nil {
 						grpcCode = int(sendMsg.Status.Code())
-						grpcMessage = "message error" // encodeGrpcMessage(sendMsg.st.Message())
+						grpcMessage = sendMsg.Status.Message()
+						//if sendMsg.Status.Code() != codes.OK {
+						//	w.Write([]byte("close msg"))
+						//}
 					}
 					// call finished
 					break LOOP
@@ -251,15 +258,6 @@ func getMethodAndStreamDescMap(ds common.Dubbo3GrpcService) (map[string]grpc.Met
 	return sdMap, strMap, nil
 }
 
-// addDefaultOption fill default options to @opt
-func addDefaultOption(opt *config.Option) *config.Option {
-	if opt == nil {
-		opt = &config.Option{}
-	}
-	opt.SetEmptyFieldDefaultConfig()
-	return opt
-}
-
 // NewH2Controller can create H2Controller with impl @rpcServiceMap and url
 // @opt can be nil or configured by user
 func NewH2Controller(isServer bool, rpcServiceMap *sync.Map, url *dubboCommon.URL, opt *config.Option) (*H2Controller, error) {
@@ -267,6 +265,13 @@ func NewH2Controller(isServer bool, rpcServiceMap *sync.Map, url *dubboCommon.UR
 
 	if url != nil {
 		pkgHandler, _ = common.GetPackagerHandler(url.Protocol)
+	}
+
+	opt = addDefaultOption(opt)
+	serilizer, err := common.GetDubbo3Serializer(opt.SerializerType)
+	if err != nil {
+		logger.Errorf("find serilizer named %s error = %v", opt.SerializerType, err)
+		return nil, err
 	}
 
 	// new http client struct
@@ -286,8 +291,9 @@ func NewH2Controller(isServer bool, rpcServiceMap *sync.Map, url *dubboCommon.UR
 		client:        client,
 		rpcServiceMap: rpcServiceMap,
 		pkgHandler:    pkgHandler,
-		option:        addDefaultOption(opt),
+		option:        opt,
 		closeChan:     make(chan struct{}),
+		serializer:    serilizer,
 	}
 	return h2c, nil
 }
@@ -300,7 +306,7 @@ secondly, it judge if it is streaming rpc or unary rpc
 thirdly, new stream and return
 
 any error occurs in the above procedures are fatal, as the invocation target can't be found.
-todo how to deal with errror in this procedure gracefully is to be discussed next
+todo how to deal with error in this procedure gracefully is to be discussed next
 */
 func (hc *H2Controller) newServerStreamFromTripleHedaer(data h2Triple.ProtocolHeader) (stream.Stream, error) {
 	paramsList := strings.Split(data.GetPath(), "/")
@@ -335,13 +341,13 @@ func (hc *H2Controller) newServerStreamFromTripleHedaer(data h2Triple.ProtocolHe
 	}
 	var newstm stream.Stream
 	if okm {
-		newstm, err = stream.NewServerStream(data, md, hc.url, service)
+		newstm, err = stream.NewServerStream(data, md, hc.url, service, hc.serializer)
 		if err != nil {
 			logger.Error("newServerStream error", err)
 			return nil, err
 		}
 	} else {
-		newstm, err = stream.NewServerStream(data, streamd, hc.url, service)
+		newstm, err = stream.NewServerStream(data, streamd, hc.url, service, hc.serializer)
 		if err != nil {
 			logger.Error("newServerStream error", err)
 			return nil, err
@@ -353,11 +359,6 @@ func (hc *H2Controller) newServerStreamFromTripleHedaer(data h2Triple.ProtocolHe
 // StreamInvoke can start streaming invocation, called by triple client, with @path
 func (hc *H2Controller) StreamInvoke(ctx context.Context, path string) (grpc.ClientStream, error) {
 	clientStream := stream.NewClientStream()
-	serilizer, err := common.GetDubbo3Serializer(codec.DefaultDubbo3SerializerName)
-	if err != nil {
-		logger.Error("get serilizer error = ", err)
-		return nil, err
-	}
 
 	tosend := clientStream.GetSend()
 	sendStreamChan := make(chan h2Triple.BufferMsg)
@@ -420,11 +421,17 @@ func (hc *H2Controller) StreamInvoke(ctx context.Context, path string) (grpc.Cli
 		logger.Errorf("triple get package handler error = %v", err)
 		return nil, err
 	}
-	return stream.NewClientUserStream(clientStream, serilizer, pkgHandler), nil
+	return stream.NewClientUserStream(clientStream, hc.serializer, pkgHandler), nil
 }
 
 // UnaryInvoke can start unary invocation, called by dubbo3 client, with @path and request @data
-func (hc *H2Controller) UnaryInvoke(ctx context.Context, path string, data []byte, reply interface{}) error {
+func (hc *H2Controller) UnaryInvoke(ctx context.Context, path string, arg, reply interface{}) error {
+	data, err := hc.serializer.Marshal(arg)
+	if err != nil {
+		logger.Errorf("client request marshal error = %v", err)
+		return err
+	}
+
 	sendStreamChan := make(chan h2Triple.BufferMsg, 2)
 
 	headerHandler, _ := common.GetProtocolHeaderHandler(hc.url.Protocol, hc.url, ctx)
@@ -434,6 +441,7 @@ func (hc *H2Controller) UnaryInvoke(ctx context.Context, path string, data []byt
 		MsgType: h2Triple.MsgType(message.DataMsgType),
 	}
 
+	// send empty message with ServerStreamCloseMsgType flag to send end stream flag in h2 header
 	sendStreamChan <- h2Triple.BufferMsg{
 		Buffer:  bytes.NewBuffer([]byte{}),
 		MsgType: h2Triple.MsgType(message.ServerStreamCloseMsgType),
@@ -458,7 +466,7 @@ func (hc *H2Controller) UnaryInvoke(ctx context.Context, path string, data []byt
 	}
 
 	// todo make timeout configurable
-	timeoutTicker := time.After(time.Second * 30)
+	timeoutTicker := time.After(time.Second * time.Duration(int(hc.option.Timeout)))
 	timeoutFlag := false
 	readCloseChain := make(chan struct{})
 
@@ -489,6 +497,10 @@ func (hc *H2Controller) UnaryInvoke(ctx context.Context, path string, data []byt
 		}
 	}()
 
+	// get trailer chan from http2
+	trailerChan := rsp.Body.(*h2Triple.ResponseBody).GetTrailerChan()
+	var trailer http.Header
+	recvTrailer := false
 LOOP:
 	for {
 		select {
@@ -514,6 +526,10 @@ LOOP:
 				close(readCloseChain)
 				break LOOP
 			}
+		case tra := <-trailerChan:
+			trailer = tra
+			recvTrailer = true
+			break LOOP
 		case <-timeoutTicker:
 			// close reading loop ablove
 			close(readCloseChain)
@@ -529,7 +545,11 @@ LOOP:
 	}
 
 	// todo start ticker to avoid trailer timeout
-	trailer := rsp.Body.(*h2Triple.ResponseBody).GetTrailer()
+	if !recvTrailer {
+		// if not receive err trailer, wait until recv
+		trailer = rsp.Body.(*h2Triple.ResponseBody).GetTrailer()
+	}
+
 	code, err := strconv.Atoi(trailer.Get(codec.TrailerKeyGrpcStatus))
 	if err != nil {
 		logger.Errorf("get trailer err = %v", err)
@@ -543,7 +563,7 @@ LOOP:
 	}
 
 	// all split data are collected and to unmarshal
-	if err := proto.Unmarshal(splitBuffer.Bytes(), reply.(proto.Message)); err != nil {
+	if err := hc.serializer.Unmarshal(splitBuffer.Bytes(), reply); err != nil {
 		logger.Errorf("client unmarshal rsp err= %v\n", err)
 		return err
 	}

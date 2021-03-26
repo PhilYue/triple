@@ -17,6 +17,7 @@
 
 package common
 
+// transfer
 const (
 	// TRIPLE is triple protocol name
 	TRIPLE = "tri"
@@ -26,4 +27,16 @@ const (
 
 	// DefaultTimeout is default timeout seconds of triple client
 	DefaultTimeout = 15
+)
+
+// serializer
+// TripleSerializerName is the type of triple serializer
+type TripleSerializerName string
+
+const (
+	// PBSerializerName is the default serializer name, triple use pb as serializer.
+	PBSerializerName = TripleSerializerName("protobuf")
+
+	// HessianSerializerName is the serializer with pb wrapped with hessian2
+	HessianSerializerName = TripleSerializerName("hessian2")
 )

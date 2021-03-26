@@ -3,8 +3,9 @@ package config
 import "github.com/dubbogo/triple/pkg/common"
 
 type Option struct {
-	Timeout    uint32
-	BufferSize uint32
+	Timeout        uint32
+	BufferSize     uint32
+	SerializerType common.TripleSerializerName
 }
 
 // SetEmptyFieldDefaultConfig set empty field to default config
@@ -15,6 +16,10 @@ func (o *Option) SetEmptyFieldDefaultConfig() {
 
 	if o.BufferSize == uint32(0) {
 		o.BufferSize = uint32(common.DefaultHttp2ControllerReadBufferSize)
+	}
+
+	if o.SerializerType == "" {
+		o.SerializerType = common.PBSerializerName
 	}
 }
 
@@ -41,6 +46,14 @@ func WithClientTimeout(timeout uint32) OptionFunction {
 func WithBufferSize(size uint32) OptionFunction {
 	return func(o *Option) *Option {
 		o.BufferSize = size
+		return o
+	}
+}
+
+// WithSerializerType return OptionFunction with target @serializerType, now we support "protobuf" and "hessian2"
+func WithSerializerType(serializerType common.TripleSerializerName) OptionFunction {
+	return func(o *Option) *Option {
+		o.SerializerType = serializerType
 		return o
 	}
 }
