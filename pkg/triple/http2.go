@@ -529,7 +529,11 @@ LOOP:
 		case tra := <-trailerChan:
 			trailer = tra
 			recvTrailer = true
-			break LOOP
+			statusCode, _ := strconv.Atoi(tra.Get(codec.TrailerKeyGrpcStatus))
+			if statusCode != 0 {
+				break LOOP
+			}
+
 		case <-timeoutTicker:
 			// close reading loop ablove
 			close(readCloseChain)
