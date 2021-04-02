@@ -18,7 +18,6 @@
 package codec
 
 import (
-	"fmt"
 	hessian "github.com/apache/dubbo-go-hessian2"
 	proto2 "github.com/dubbogo/triple/internal/codec/proto"
 	"github.com/golang/protobuf/proto"
@@ -172,7 +171,6 @@ func (h *TripleHessianWrapperSerializer) MarshalResponse(v interface{}) ([]byte,
 		Data:          data,
 		Type:          getArgType(v),
 	}
-	fmt.Println("type = ", wrapperRequest.Type)
 	return h.pbSerializer.MarshalResponse(wrapperRequest)
 }
 
