@@ -50,7 +50,7 @@ func (ss *baseUserStream) Context() context.Context {
 	return nil
 }
 func (ss *baseUserStream) SendMsg(m interface{}) error {
-	replyData, err := ss.serilizer.Marshal(m)
+	replyData, err := ss.serilizer.MarshalRequest(m)
 	if err != nil {
 		logger.Error("sen msg error with msg = ", m)
 		return err
@@ -67,7 +67,7 @@ func (ss *baseUserStream) RecvMsg(m interface{}) error {
 		return errors.Errorf("user stream closed!")
 	}
 	pkgData, _ := ss.pkgHandler.Frame2PkgData(readBuf.Bytes())
-	if err := ss.serilizer.Unmarshal(pkgData, m); err != nil {
+	if err := ss.serilizer.UnmarshalResponse(pkgData, m); err != nil {
 		return err
 	}
 	return nil

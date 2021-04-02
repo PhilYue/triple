@@ -69,8 +69,10 @@ func SetPackageHandler(protocol string, f PackageHandlerFactory) {
 
 // Dubbo3Serializer
 type Dubbo3Serializer interface {
-	Marshal(interface{}) ([]byte, error)
-	Unmarshal(data []byte, v interface{}) error
+	MarshalRequest(interface{}) ([]byte, error)
+	UnmarshalRequest(data []byte, v interface{}) error
+	MarshalResponse(interface{}) ([]byte, error)
+	UnmarshalResponse(data []byte, v interface{}) error
 }
 
 type SerializerFactory func() Dubbo3Serializer

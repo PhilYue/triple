@@ -19,6 +19,7 @@ package stream
 
 import (
 	"bytes"
+	"github.com/dubbogo/triple/pkg/config"
 )
 import (
 	dubboCommon "github.com/apache/dubbo-go/common"
@@ -158,8 +159,31 @@ func (ss *serverStream) Close() {
 	ss.processor.close()
 }
 
+func NewUnaryServerStreamWithOutDesc(header h2Triple.ProtocolHeader, url *dubboCommon.URL, service common.Dubbo3GrpcService, serializer common.Dubbo3Serializer, option *config.Option) (*serverStream, error) {
+	baseStream := newBaseStream(service)
+
+	serverStream := &serverStream{
+		baseStream: *baseStream,
+		header:     header,
+	}
+	pkgHandler, err := common.GetPackagerHandler(url.Protocol)
+	if err != nil {
+		logger.Error("GetPkgHandler error with err = ", err)
+		return nil, err
+	}
+	serverStream.processor, err = newUnaryProcessor(serverStream, pkgHandler, grpc.MethodDesc{}, serializer, option)
+	if err != nil {
+		logger.Errorf("new processor error with err = %s\n", err)
+		return nil, err
+	}
+
+	serverStream.processor.runRPC()
+
+	return serverStream, nil
+}
+
 // NewServerStream creates new server stream
-func NewServerStream(header h2Triple.ProtocolHeader, desc interface{}, url *dubboCommon.URL, service common.Dubbo3GrpcService, serializer common.Dubbo3Serializer) (*serverStream, error) {
+func NewServerStream(header h2Triple.ProtocolHeader, desc interface{}, url *dubboCommon.URL, service common.Dubbo3GrpcService, serializer common.Dubbo3Serializer, option *config.Option) (*serverStream, error) {
 	baseStream := newBaseStream(service)
 
 	serverStream := &serverStream{
@@ -173,9 +197,9 @@ func NewServerStream(header h2Triple.ProtocolHeader, desc interface{}, url *dubb
 	}
 	if methodDesc, ok := desc.(grpc.MethodDesc); ok {
 		// pkgHandler and processor are the same level
-		serverStream.processor, err = newUnaryProcessor(serverStream, pkgHandler, methodDesc, serializer)
+		serverStream.processor, err = newUnaryProcessor(serverStream, pkgHandler, methodDesc, serializer, option)
 	} else if streamDesc, ok := desc.(grpc.StreamDesc); ok {
-		serverStream.processor, err = newStreamingProcessor(serverStream, pkgHandler, streamDesc, serializer)
+		serverStream.processor, err = newStreamingProcessor(serverStream, pkgHandler, streamDesc, serializer, option)
 	} else {
 		logger.Error("grpc desc invalid:", desc)
 		return nil, nil

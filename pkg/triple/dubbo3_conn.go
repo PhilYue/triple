@@ -19,8 +19,6 @@ package triple
 
 import (
 	"context"
-	"github.com/go-errors/errors"
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 	"reflect"
 )
@@ -34,15 +32,7 @@ type TripleConn struct {
 // @method is /interfaceKey/functionName e.g. /com.apache.dubbo.sample.basic.IGreeter/BigUnaryTest
 // @arg is request body, must be proto.Message type
 func (t *TripleConn) Invoke(ctx context.Context, method string, args, reply interface{}, opts ...grpc.CallOption) error {
-	protoMsg, ok := args.(proto.Message)
-	if !ok {
-		return errors.Errorf("input is not impl of proto.Message")
-	}
-	replyMsg, ok := reply.(proto.Message)
-	if !ok {
-		return errors.Errorf("reply is not impl of proto.Message")
-	}
-	if err := t.client.Request(ctx, method, protoMsg, replyMsg); err != nil {
+	if err := t.client.Request(ctx, method, args, reply); err != nil {
 		return err
 	}
 	return nil

@@ -132,9 +132,10 @@ func (t *TripleHeaderHandler) WriteTripleReqHeaderField(header http.Header) http
 
 // WriteTripleFinalRspHeaderField returns trailers header fields that triple and grpc defined
 func (t *TripleHeaderHandler) WriteTripleFinalRspHeaderField(w http.ResponseWriter, grpcStatusCode int, grpcMessage string, traceProtoBin int) {
-	w.Header().Set(TrailerKeyGrpcStatus, strconv.Itoa(grpcStatusCode))   // sendMsg.st.Code()
-	w.Header().Set(TrailerKeyGrpcMessage, grpcMessage)                   //encodeGrpcMessage(""))
-	w.Header().Set(TrailerKeyTraceProtoBin, strconv.Itoa(traceProtoBin)) // sendMsg.st.Code()
+	w.Header().Set(TrailerKeyGrpcStatus, strconv.Itoa(grpcStatusCode)) // sendMsg.st.Code()
+	w.Header().Set(TrailerKeyGrpcMessage, grpcMessage)                 //encodeGrpcMessage(""))
+	// todo now if add this field, java-provider may caused unexpected error.
+	//w.Header().Set(TrailerKeyTraceProtoBin, strconv.Itoa(traceProtoBin)) // sendMsg.st.Code()
 }
 
 // getCtxVaSave get key @fields value and return, if not exist, return empty string

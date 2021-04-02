@@ -267,7 +267,6 @@ func NewH2Controller(isServer bool, rpcServiceMap *sync.Map, url *dubboCommon.UR
 		pkgHandler, _ = common.GetPackagerHandler(url.Protocol)
 	}
 
-	opt = addDefaultOption(opt)
 	serilizer, err := common.GetDubbo3Serializer(opt.SerializerType)
 	if err != nil {
 		logger.Errorf("find serilizer named %s error = %v", opt.SerializerType, err)
@@ -326,34 +325,52 @@ func (hc *H2Controller) newServerStreamFromTripleHedaer(data h2Triple.ProtocolHe
 		return nil, status.Err(codes.Internal, "can't assert impl of interface "+interfaceKey+" to dubbo RPCService")
 	}
 
-	mdMap, strMap, err := getMethodAndStreamDescMap(service)
-	if err != nil {
-		logger.Error("new H2 controller error:", err)
-		return nil, status.Err(codes.Unimplemented, err.Error())
-	}
-
-	md, okm := mdMap[methodName]
-	streamd, oks := strMap[methodName]
-
-	if !okm && !oks {
-		logger.Errorf("method name %s not found in desc", methodName)
-		return nil, status.Err(codes.Unimplemented, "method name %s not found in desc")
-	}
 	var newstm stream.Stream
-	if okm {
-		newstm, err = stream.NewServerStream(data, md, hc.url, service, hc.serializer)
+
+	// creat server stream
+	switch hc.option.SerializerType {
+	case common.TripleHessianWrapperSerializerName:
+		// hessian serializer doesn't need to use grpc.Desc, and now only support unary invocation
+		var err error
+		newstm, err = stream.NewUnaryServerStreamWithOutDesc(data, hc.url, service, hc.serializer, hc.option)
 		if err != nil {
-			logger.Error("newServerStream error", err)
+			logger.Errorf("hessian server new server stream error = %v", err)
 			return nil, err
 		}
-	} else {
-		newstm, err = stream.NewServerStream(data, streamd, hc.url, service, hc.serializer)
+	case common.PBSerializerName:
+		// pb serializer needs grpc.Desc to do method discovery, allowing unary and streaming invocation
+		mdMap, strMap, err := getMethodAndStreamDescMap(service)
 		if err != nil {
-			logger.Error("newServerStream error", err)
-			return nil, err
+			logger.Error("new H2 controller error:", err)
+			return nil, status.Err(codes.Unimplemented, err.Error())
 		}
+		md, okm := mdMap[methodName]
+		streamd, oks := strMap[methodName]
+		if !okm && !oks {
+			logger.Errorf("method name %s not found in desc", methodName)
+			return nil, status.Err(codes.Unimplemented, "method name %s not found in desc")
+		}
+
+		if okm {
+			newstm, err = stream.NewServerStream(data, md, hc.url, service, hc.serializer, hc.option)
+			if err != nil {
+				logger.Error("newServerStream error", err)
+				return nil, err
+			}
+		} else {
+			newstm, err = stream.NewServerStream(data, streamd, hc.url, service, hc.serializer, hc.option)
+			if err != nil {
+				logger.Error("newServerStream error", err)
+				return nil, err
+			}
+		}
+	default:
+		logger.Errorf("http2 controller serializer type = %s is invalid", hc.option.SerializerType)
+		return nil, perrors.Errorf("http2 controller serializer type = %s is invalid", hc.option.SerializerType)
 	}
+
 	return newstm, nil
+
 }
 
 // StreamInvoke can start streaming invocation, called by triple client, with @path
@@ -426,7 +443,7 @@ func (hc *H2Controller) StreamInvoke(ctx context.Context, path string) (grpc.Cli
 
 // UnaryInvoke can start unary invocation, called by dubbo3 client, with @path and request @data
 func (hc *H2Controller) UnaryInvoke(ctx context.Context, path string, arg, reply interface{}) error {
-	data, err := hc.serializer.Marshal(arg)
+	data, err := hc.serializer.MarshalRequest(arg)
 	if err != nil {
 		logger.Errorf("client request marshal error = %v", err)
 		return err
@@ -567,7 +584,7 @@ LOOP:
 	}
 
 	// all split data are collected and to unmarshal
-	if err := hc.serializer.Unmarshal(splitBuffer.Bytes(), reply); err != nil {
+	if err := hc.serializer.UnmarshalResponse(splitBuffer.Bytes(), reply); err != nil {
 		logger.Errorf("client unmarshal rsp err= %v\n", err)
 		return err
 	}

@@ -20,12 +20,15 @@ package stream
 import (
 	"bytes"
 	"errors"
+	"github.com/apache/dubbo-go/protocol/invocation"
+	"github.com/dubbogo/triple/internal/codec"
+	"github.com/dubbogo/triple/pkg/config"
+	"strings"
 	"sync"
 )
 import (
 	"github.com/apache/dubbo-go/common/logger"
 	h2Triple "github.com/dubbogo/net/http2/triple"
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 )
 import (
@@ -49,6 +52,7 @@ type baseProcessor struct {
 	serializer common.Dubbo3Serializer
 	closeChain chan struct{}
 	quitOnce   sync.Once
+	opt        *config.Option
 }
 
 func (p *baseProcessor) handleRPCErr(err error) {
@@ -80,7 +84,7 @@ type unaryProcessor struct {
 }
 
 // newUnaryProcessor can create unary processor
-func newUnaryProcessor(s *serverStream, pkgHandler common.PackageHandler, desc grpc.MethodDesc, serializer common.Dubbo3Serializer) (processor, error) {
+func newUnaryProcessor(s *serverStream, pkgHandler common.PackageHandler, desc grpc.MethodDesc, serializer common.Dubbo3Serializer, option *config.Option) (processor, error) {
 	return &unaryProcessor{
 		baseProcessor: baseProcessor{
 			serializer: serializer,
@@ -88,6 +92,7 @@ func newUnaryProcessor(s *serverStream, pkgHandler common.PackageHandler, desc g
 			pkgHandler: pkgHandler,
 			closeChain: make(chan struct{}, 1),
 			quitOnce:   sync.Once{},
+			opt:        option,
 		},
 		methodDesc: desc,
 	}, nil
@@ -99,19 +104,34 @@ func (p *unaryProcessor) processUnaryRPC(buf bytes.Buffer, service common.Dubbo3
 
 	pkgData, _ := p.pkgHandler.Frame2PkgData(readBuf)
 
-	descFunc := func(v interface{}) error {
-		if err := p.serializer.Unmarshal(pkgData, v.(proto.Message)); err != nil {
-			return status.Errorf(codes.Internal, "Unary rpc request unmarshal error: %s", err)
+	var reply interface{}
+	var err error
+	if p.opt.SerializerType == common.TripleHessianWrapperSerializerName {
+		paramList := strings.Split(header.GetPath(), "/")
+		methodName := paramList[2]
+		var v codec.HessianUnmarshalStruct
+		if err := p.serializer.UnmarshalRequest(pkgData, &v); err != nil {
+			return nil, status.Errorf(codes.Internal, "Unary rpc request unmarshal error: %s", err)
 		}
-		return nil
+		args := v.Val.([]interface{})
+		result := service.GetProxyImpl().Invoke(header.FieldToCtx(), invocation.NewRPCInvocation(methodName, args, nil))
+		reply = result.Result()
+		err = result.Error()
+	} else if p.opt.SerializerType == common.PBSerializerName {
+		descFunc := func(v interface{}) error {
+			if err := p.serializer.UnmarshalRequest(pkgData, v); err != nil {
+				return status.Errorf(codes.Internal, "Unary rpc request unmarshal error: %s", err)
+			}
+			return nil
+		}
+		reply, err = p.methodDesc.Handler(service, header.FieldToCtx(), descFunc, nil)
 	}
 
-	reply, err := p.methodDesc.Handler(service, header.FieldToCtx(), descFunc, nil)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Unary rpc handle error: %s", err)
 	}
 
-	replyData, err := p.serializer.Marshal(reply.(proto.Message))
+	replyData, err := p.serializer.MarshalResponse(reply)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Unary rpc reoly marshal error: %s", err)
 	}
@@ -134,7 +154,7 @@ func (p *unaryProcessor) runRPC() {
 			// in this case, server unary processor have the chance to do process and return result
 			defer func() {
 				if e := recover(); e != nil {
-					p.handleRPCErr(errors.New(e.(string)))
+					p.handleRPCErr(errors.New(e.(error).Error()))
 				}
 			}()
 			if recvMsg.Err != nil {
@@ -164,7 +184,7 @@ type streamingProcessor struct {
 }
 
 // newStreamingProcessor can create new streaming processor
-func newStreamingProcessor(s *serverStream, pkgHandler common.PackageHandler, desc grpc.StreamDesc, serializer common.Dubbo3Serializer) (processor, error) {
+func newStreamingProcessor(s *serverStream, pkgHandler common.PackageHandler, desc grpc.StreamDesc, serializer common.Dubbo3Serializer, option *config.Option) (processor, error) {
 	return &streamingProcessor{
 		baseProcessor: baseProcessor{
 			serializer: serializer,
@@ -172,6 +192,7 @@ func newStreamingProcessor(s *serverStream, pkgHandler common.PackageHandler, de
 			pkgHandler: pkgHandler,
 			closeChain: make(chan struct{}, 1),
 			quitOnce:   sync.Once{},
+			opt:        option,
 		},
 		streamDesc: desc,
 	}, nil

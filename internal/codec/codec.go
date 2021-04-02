@@ -18,9 +18,10 @@
 package codec
 
 import (
+	"fmt"
 	hessian "github.com/apache/dubbo-go-hessian2"
+	proto2 "github.com/dubbogo/triple/internal/codec/proto"
 	"github.com/golang/protobuf/proto"
-	perrors "github.com/pkg/errors"
 )
 
 import (
@@ -30,6 +31,7 @@ import (
 func init() {
 	common.SetDubbo3Serializer(common.PBSerializerName, NewProtobufCodeC)
 	common.SetDubbo3Serializer(common.HessianSerializerName, NewHessianCodeC)
+	common.SetDubbo3Serializer(common.TripleHessianWrapperSerializerName, NewTripleHessianWrapperSerializer)
 }
 
 // ProtobufCodeC is the protobuf impl of Dubbo3Serializer interface
@@ -37,13 +39,23 @@ type ProtobufCodeC struct {
 }
 
 // Marshal serialize interface @v to bytes
-func (p *ProtobufCodeC) Marshal(v interface{}) ([]byte, error) {
+func (p *ProtobufCodeC) MarshalRequest(v interface{}) ([]byte, error) {
 	return proto.Marshal(v.(proto.Message))
 }
 
 // Unmarshal deserialize @data to interface
-func (p *ProtobufCodeC) Unmarshal(data []byte, v interface{}) error {
+func (p *ProtobufCodeC) UnmarshalRequest(data []byte, v interface{}) error {
 	return proto.Unmarshal(data, v.(proto.Message))
+}
+
+// Marshal serialize interface @v to bytes
+func (p *ProtobufCodeC) MarshalResponse(v interface{}) ([]byte, error) {
+	return p.MarshalRequest(v)
+}
+
+// Unmarshal deserialize @data to interface
+func (p *ProtobufCodeC) UnmarshalResponse(data []byte, v interface{}) error {
+	return p.UnmarshalRequest(data, v)
 }
 
 // NewProtobufCodeC returns new ProtobufCodeC
@@ -51,56 +63,124 @@ func NewProtobufCodeC() common.Dubbo3Serializer {
 	return &ProtobufCodeC{}
 }
 
-// HessianTransferPackage is hessian encode package, wrapping pb data
-type HessianTransferPackage struct {
-	Length int
-	Type   string
-	Data   []byte
-}
-
-func (HessianTransferPackage) JavaClassName() string {
-	return "org.apache.dubbo.HessianPkg"
-}
+//// HessianTransferPackage is hessian encode package, wrapping pb data
+//type HessianTransferPackage struct {
+//	Length int
+//	Type   string
+//	Data   []byte
+//}
+//
+//func (HessianTransferPackage) JavaClassName() string {
+//	return "org.apache.dubbo.HessianPkg"
+//}
 
 type HessianCodeC struct {
-	protoBufSerilizer common.Dubbo3Serializer
 }
 
-func (h *HessianCodeC) Marshal(v interface{}) ([]byte, error) {
-	pbData, err := h.protoBufSerilizer.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	hessianTranseferPkg := HessianTransferPackage{
-		Length: len(pbData),
-		Data:   pbData,
-	}
+func (h *HessianCodeC) MarshalRequest(v interface{}) ([]byte, error) {
 	encoder := hessian.NewEncoder()
-	if err := encoder.Encode(hessianTranseferPkg); err != nil {
+	if err := encoder.Encode(v); err != nil {
 		return nil, err
 	}
 	return encoder.Buffer(), nil
 }
 
-func (h *HessianCodeC) Unmarshal(data []byte, v interface{}) error {
-	var err error
-	var pbStruct interface{}
+type HessianUnmarshalStruct struct {
+	Val interface{}
+}
+
+func (h *HessianCodeC) UnmarshalRequest(data []byte, v interface{}) error {
 	decoder := hessian.NewDecoder(data)
-	pbStruct, err = decoder.Decode()
-	if err != nil {
-		return err
-	}
-	hessianTransferPkg, ok := pbStruct.(*HessianTransferPackage)
-	if !ok {
-		return perrors.Errorf("hessian serializer gets pkg that not hessianTransfer pkg")
-	}
-	return h.protoBufSerilizer.Unmarshal(hessianTransferPkg.Data, v)
+	val, err := decoder.Decode()
+	v.(*HessianUnmarshalStruct).Val = val
+	return err
+}
+
+func (h *HessianCodeC) MarshalResponse(v interface{}) ([]byte, error) {
+	return h.MarshalRequest(v)
+}
+
+func (h *HessianCodeC) UnmarshalResponse(data []byte, v interface{}) error {
+	return h.UnmarshalRequest(data, v)
 }
 
 // NewHessianCodeC returns new HessianCodeC
 func NewHessianCodeC() common.Dubbo3Serializer {
-	hessian.RegisterPOJO(&HessianTransferPackage{})
-	return &HessianCodeC{
-		protoBufSerilizer: NewProtobufCodeC(),
+	return &HessianCodeC{}
+}
+
+// TripleHessianWrapperSerializer
+type TripleHessianWrapperSerializer struct {
+	pbSerializer      common.Dubbo3Serializer
+	hessianSerializer common.Dubbo3Serializer
+}
+
+func NewTripleHessianWrapperSerializer() common.Dubbo3Serializer {
+	return &TripleHessianWrapperSerializer{
+		pbSerializer:      NewProtobufCodeC(),
+		hessianSerializer: NewHessianCodeC(),
 	}
+}
+
+func (h *TripleHessianWrapperSerializer) MarshalRequest(v interface{}) ([]byte, error) {
+	args := v.([]interface{})
+	argsBytes := make([][]byte, 0)
+	argsTypes := make([]string, 0)
+	for _, v := range args {
+		data, err := h.hessianSerializer.MarshalRequest(v)
+		if err != nil {
+			return nil, err
+		}
+		argsBytes = append(argsBytes, data)
+		argsTypes = append(argsTypes, getArgType(v))
+	}
+
+	wrapperRequest := &proto2.TripleRequestWrapper{
+		SerializeType: string(common.HessianSerializerName),
+		Args:          argsBytes,
+		// todo to java name
+		ArgTypes: argsTypes,
+	}
+	return h.pbSerializer.MarshalRequest(wrapperRequest)
+}
+
+func (h *TripleHessianWrapperSerializer) UnmarshalRequest(data []byte, v interface{}) error {
+	wrapperRequest := proto2.TripleRequestWrapper{}
+	err := h.pbSerializer.UnmarshalRequest(data, &wrapperRequest)
+	if err != nil {
+		return err
+	}
+	args := []interface{}{}
+	for _, v := range wrapperRequest.Args {
+		arg := HessianUnmarshalStruct{}
+		if err := h.hessianSerializer.UnmarshalRequest(v, &arg); err != nil {
+			return err
+		}
+		args = append(args, arg.Val)
+	}
+	v.(*HessianUnmarshalStruct).Val = args
+	return nil
+}
+
+func (h *TripleHessianWrapperSerializer) MarshalResponse(v interface{}) ([]byte, error) {
+	data, err := h.hessianSerializer.MarshalResponse(v)
+	if err != nil {
+		return nil, err
+	}
+	wrapperRequest := &proto2.TripleResponseWrapper{
+		SerializeType: string(common.HessianSerializerName),
+		Data:          data,
+		Type:          getArgType(v),
+	}
+	fmt.Println("type = ", wrapperRequest.Type)
+	return h.pbSerializer.MarshalResponse(wrapperRequest)
+}
+
+func (h *TripleHessianWrapperSerializer) UnmarshalResponse(data []byte, v interface{}) error {
+	wrapperResponse := proto2.TripleResponseWrapper{}
+	err := h.pbSerializer.UnmarshalResponse(data, &wrapperResponse)
+	if err != nil {
+		return err
+	}
+	return h.hessianSerializer.UnmarshalResponse(wrapperResponse.Data, v)
 }

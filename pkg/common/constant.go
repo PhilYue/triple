@@ -39,4 +39,7 @@ const (
 
 	// HessianSerializerName is the serializer with pb wrapped with hessian2
 	HessianSerializerName = TripleSerializerName("hessian2")
+
+	// TripleHessianWrapperSerializerName is the serializer with pb wrapped with hessian2
+	TripleHessianWrapperSerializerName = TripleSerializerName("triple-hessian-wrapper")
 )
