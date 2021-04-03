@@ -69,22 +69,24 @@ func SetPackageHandler(protocol string, f PackageHandlerFactory) {
 
 // Dubbo3Serializer
 type Dubbo3Serializer interface {
-	Marshal(interface{}) ([]byte, error)
-	Unmarshal(data []byte, v interface{}) error
+	MarshalRequest(interface{}) ([]byte, error)
+	UnmarshalRequest(data []byte, v interface{}) error
+	MarshalResponse(interface{}) ([]byte, error)
+	UnmarshalResponse(data []byte, v interface{}) error
 }
 
 type SerializerFactory func() Dubbo3Serializer
 
 var dubbo3SerializerMap = make(map[string]SerializerFactory)
 
-func GetDubbo3Serializer(serialization string) (Dubbo3Serializer, error) {
-	if f, ok := dubbo3SerializerMap[serialization]; ok {
+func GetDubbo3Serializer(serialization TripleSerializerName) (Dubbo3Serializer, error) {
+	if f, ok := dubbo3SerializerMap[string(serialization)]; ok {
 		return f(), nil
 	}
 	logger.Error("Serilization ", serialization, " factory undefined!")
 	return nil, perrors.New(fmt.Sprintf("Serilization %sfactory undefined!", serialization))
 }
 
-func SetDubbo3Serializer(serialization string, f SerializerFactory) {
-	dubbo3SerializerMap[serialization] = f
+func SetDubbo3Serializer(serialization TripleSerializerName, f SerializerFactory) {
+	dubbo3SerializerMap[string(serialization)] = f
 }

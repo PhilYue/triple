@@ -28,7 +28,9 @@ type TripleConn struct {
 	client *TripleClient
 }
 
-// Invoke called when unary rpc 's pb.go file
+// Invoke called by unary rpc 's pb.go file in dubbo-go 3.0 design
+// @method is /interfaceKey/functionName e.g. /com.apache.dubbo.sample.basic.IGreeter/BigUnaryTest
+// @arg is request body, must be proto.Message type
 func (t *TripleConn) Invoke(ctx context.Context, method string, args, reply interface{}, opts ...grpc.CallOption) error {
 	if err := t.client.Request(ctx, method, args, reply); err != nil {
 		return err
@@ -37,6 +39,7 @@ func (t *TripleConn) Invoke(ctx context.Context, method string, args, reply inte
 }
 
 // NewStream called when streaming rpc 's pb.go file
+// @method is /interfaceKey/functionName e.g. /com.apache.dubbo.sample.basic.IGreeter/BigStreamTest
 func (t *TripleConn) NewStream(ctx context.Context, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	return t.client.StreamRequest(ctx, method)
 }

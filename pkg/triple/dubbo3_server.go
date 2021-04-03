@@ -18,6 +18,7 @@
 package triple
 
 import (
+	"github.com/dubbogo/triple/pkg/config"
 	"io"
 	"net"
 	"net/http"
@@ -30,28 +31,29 @@ import (
 	"golang.org/x/net/http2"
 )
 
-import (
-	common "github.com/dubbogo/triple/pkg/common"
-)
-
 // TripleServer is the object that can be started and listening remote request
 type TripleServer struct {
-	lst          net.Listener
-	addr         string
-	rpcService   common.Dubbo3GrpcService
-	url          *dubboCommon.URL
-	h2Controller *H2Controller
-	once         sync.Once // use when destroy
-	closeChain   chan struct{}
+	lst           net.Listener
+	addr          string
+	rpcServiceMap *sync.Map
+	url           *dubboCommon.URL
+	h2Controller  *H2Controller
+	closeChain    chan struct{}
+
+	// config
+	opt *config.Option
 }
 
-// NewTripleServer can create Server with user impled @service and url
-func NewTripleServer(url *dubboCommon.URL, service common.Dubbo3GrpcService) *TripleServer {
+// NewTripleServer can create Server with url and some user impl providers stored in @serviceMap
+// @serviceMap should be sync.Map: "interfaceKey" -> Dubbo3GrpcService
+func NewTripleServer(url *dubboCommon.URL, serviceMap *sync.Map, opt *config.Option) *TripleServer {
+	opt = addDefaultOption(opt)
 	return &TripleServer{
-		addr:       url.Location,
-		rpcService: service,
-		url:        url,
-		closeChain: make(chan struct{}, 1),
+		addr:          url.Location,
+		rpcServiceMap: serviceMap,
+		url:           url,
+		closeChain:    make(chan struct{}, 1),
+		opt:           opt,
 	}
 }
 
@@ -103,7 +105,7 @@ func (t *TripleServer) run() {
 // handleRawConn create a H2 Controller to deal with new conn
 func (t *TripleServer) handleRawConn(conn net.Conn) error {
 	srv := &http2.Server{}
-	h2Controller, err := NewH2Controller(true, t.rpcService, t.url)
+	h2Controller, err := NewH2Controller(true, t.rpcServiceMap, t.url, t.opt)
 	if err != nil {
 		return err
 	}
@@ -111,5 +113,4 @@ func (t *TripleServer) handleRawConn(conn net.Conn) error {
 	opts := &http2.ServeConnOpts{Handler: http.HandlerFunc(h2Controller.GetHandler())}
 	srv.ServeConn(conn, opts)
 	return nil
-	//return h2Controller.H2ShakeHand()
 }

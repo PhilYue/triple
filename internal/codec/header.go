@@ -19,7 +19,7 @@ package codec
 
 import (
 	"context"
-	h2 "github.com/dubbogo/net/http2"
+	"github.com/apache/dubbo-go/common/constant"
 	h2Triple "github.com/dubbogo/net/http2/triple"
 	"net/http"
 	"net/textproto"
@@ -36,7 +36,7 @@ import (
 
 func init() {
 	// if user choose dubbo3 as url.Protocol, triple Handler will use it to handle header
-	common.SetProtocolHeaderHandler(DUBBO3, NewTripleHeaderHandler)
+	common.SetProtocolHeaderHandler(common.TRIPLE, NewTripleHeaderHandler)
 }
 
 // TrailerKeys are to make triple compatible with grpc
@@ -107,9 +107,16 @@ func NewTripleHeaderHandler(url *dubboCommon.URL, ctx context.Context) h2Triple.
 // it parse field of url and ctx to HTTP2 Header field, developer must assure "tri-" prefix field be string
 // if not, it will cause panic!
 func (t *TripleHeaderHandler) WriteTripleReqHeaderField(header http.Header) http.Header {
+
 	header["user-agent"] = []string{"grpc-go/1.35.0-dev"}
-	header["tri-service-version"] = []string{getCtxVaSave(t.Ctx, "tri-service-version")}
-	header["tri-service-group"] = []string{getCtxVaSave(t.Ctx, "tri-service-group")}
+	// get from ctx
+	//header["tri-service-version"] = []string{getCtxVaSave(t.Ctx, "tri-service-version")}
+	//header["tri-service-group"] = []string{getCtxVaSave(t.Ctx, "tri-service-group")}
+
+	// now we choose get from url
+	header["tri-service-version"] = []string{t.Url.GetParam(constant.APP_VERSION_KEY, "")}
+	header["tri-service-group"] = []string{t.Url.GetParam(constant.GROUP_KEY, "")}
+
 	header["tri-req-id"] = []string{getCtxVaSave(t.Ctx, "tri-req-id")}
 	header["tri-trace-traceid"] = []string{getCtxVaSave(t.Ctx, "tri-trace-traceid")}
 	header["tri-trace-rpcid"] = []string{getCtxVaSave(t.Ctx, "tri-trace-rpcid")}
@@ -125,9 +132,10 @@ func (t *TripleHeaderHandler) WriteTripleReqHeaderField(header http.Header) http
 
 // WriteTripleFinalRspHeaderField returns trailers header fields that triple and grpc defined
 func (t *TripleHeaderHandler) WriteTripleFinalRspHeaderField(w http.ResponseWriter, grpcStatusCode int, grpcMessage string, traceProtoBin int) {
-	w.Header().Add(h2.TrailerPrefix+TrailerKeyGrpcStatus, strconv.Itoa(grpcStatusCode))   // sendMsg.st.Code()
-	w.Header().Add(h2.TrailerPrefix+TrailerKeyGrpcMessage, grpcMessage)                   //encodeGrpcMessage(""))
-	w.Header().Add(h2.TrailerPrefix+TrailerKeyTraceProtoBin, strconv.Itoa(traceProtoBin)) // sendMsg.st.Code()
+	w.Header().Set(TrailerKeyGrpcStatus, strconv.Itoa(grpcStatusCode)) // sendMsg.st.Code()
+	w.Header().Set(TrailerKeyGrpcMessage, grpcMessage)                 //encodeGrpcMessage(""))
+	// todo now if add this field, java-provider may caused unexpected error.
+	//w.Header().Set(TrailerKeyTraceProtoBin, strconv.Itoa(traceProtoBin)) // sendMsg.st.Code()
 }
 
 // getCtxVaSave get key @fields value and return, if not exist, return empty string
